@@ -1,0 +1,74 @@
+/dts-v1/;
+
+#include "an7581.dtsi"
+
+/ {
+	model = "Nokia Bell XG-040G-MD";
+	compatible = "nokia,xg-040g-md", "airoha,an7581";
+
+	aliases {
+		serial0 = &uart0;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	// 强制定义内存为 512MB
+	// 起始地址 0x40000000，大小 0x20000000 (512M)
+	memory@40000000 {
+		device_type = "memory";
+		reg = <0x0 0x40000000 0x0 0x20000000>;
+	};
+};
+
+&uart0 {
+	status = "okay";
+};
+
+&spi_nand {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi_nand_pins>;
+
+	spi_nand@0 {
+		compatible = "spi-nand";
+		reg = <0>;
+		spi-max-frequency = <52000000>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			// --- 警告：分区表需要根据原厂固件调整 ---
+			// 下面是通用的 OpenWrt SPI-NAND 布局
+			
+			partition@0 {
+				label = "u-boot";
+				reg = <0x0 0x100000>; // 1MB
+				read-only;
+			};
+
+			partition@100000 {
+				label = "u-boot-env";
+				reg = <0x100000 0x80000>; // 512KB
+			};
+
+			partition@180000 {
+				label = "factory";
+				reg = <0x180000 0x200000>; // 2MB (存放WiFi校准)
+				read-only;
+			};
+
+			partition@380000 {
+				label = "firmware";
+				reg = <0x380000 0xFC80000>; // 剩余空间
+			};
+		};
+	};
+};
+
+&eth0 {
+	status = "okay";
+};
