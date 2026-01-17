@@ -1,163 +1,158 @@
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-#
-# File: .github/workflows/openwrt-builder.yml
-# Description: Build OpenWrt using GitHub Actions
-#
-# Copyright (c) 2019-2024 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
-
 name: OpenWrt Builder
 
 on:
-  repository_dispatch:
   workflow_dispatch:
-
-env:
-  REPO_URL: https://github.com/openwrt/openwrt
-  REPO_BRANCH: v24.10.5
-  FEEDS_CONF: feeds.conf.default
-  CONFIG_FILE: .config
-  DIY_P1_SH: diy-part1.sh
-  DIY_P2_SH: diy-part2.sh
-  UPLOAD_BIN_DIR: false
-  UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: true
-  TZ: Asia/Shanghai
+    inputs:
+      source_repo:
+        description: '仓库'
+        required: true
+        default: 'openwrt/openwrt'
+        type: string
+      source_branch:
+        description: '分支'
+        required: true
+        default: 'openwrt-24.10.5'
+        type: string
+      custom_feeds:
+        description: '软件源（src-git luci https://github.com/openwrt/luci.git）'
+        required: false
+        default: ''
+        type: string
+      target:
+        description: '架构'
+        required: true
+        default: 'airoha'
+        type: string
+      subtarget:
+        description: '芯片'
+        required: true
+        default: 'an7581'
+        type: string
+      profile:
+        description: '配置'
+        required: true
+        default: 'nokia_xg-040g-md'
+        type: string
+      packages:
+        description: '软件（使用空格分隔）'
+        required: false
+        default: 'luci-app-turboacc'
+        type: string
 
 jobs:
-  build:
-    runs-on: ubuntu-22.04
+  build-firmware:
+    name: 构建 ${{ github.event.inputs.profile }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: write
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@main
+    - name: 初始化环境
+      run: |
+        echo "BUILD_TIME=$(date +%Y%m%d%H%M%S)" >> $GITHUB_ENV
+        echo "TARGET=${{ github.event.inputs.target }}" >> $GITHUB_ENV
+        echo "SUBTARGET=${{ github.event.inputs.subtarget }}" >> $GITHUB_ENV
+        echo "PROFILE=${{ github.event.inputs.profile }}" >> $GITHUB_ENV
+        sudo mkdir -p /mnt/openwrt
+        sudo chown -R runner:runner /mnt/openwrt
 
-    - name: Free Disk Space (释放磁盘空间)
-      uses: jlumbroso/free-disk-space@main
+    - name: 检出源码
+      uses: actions/checkout@v4
       with:
-        tool-cache: true
-        android: true
-        dotnet: true
-        haskell: true
-        large-packages: true
-        docker-images: true
-        swap-storage: true
+        repository: ${{ github.event.inputs.source_repo }}
+        ref: ${{ github.event.inputs.source_branch }}
 
-    - name: Initialization environment
-      env:
-        DEBIAN_FRONTEND: noninteractive
+    - name: 移动源码
       run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-        sudo docker image prune --all --force
-        sudo -E apt-get -qq update
-        sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
-        sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
+        mv ${{ github.workspace }} /mnt/openwrt/openwrt-src
+        ln -sfn /mnt/openwrt/openwrt-src ${{ github.workspace }}
 
-    - name: Clone source code
-      working-directory: /workdir
+    - name: 自定义软件源
+      if: github.event.inputs.custom_feeds != ''
       run: |
-        df -hT $PWD
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        cd /mnt/openwrt/openwrt-src
+        echo "${{ github.event.inputs.custom_feeds }}" | sed '/^$/d' >> feeds.conf.default
 
-    - name: Load custom feeds
+    - name: 安装编译工具
       run: |
-        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
-        chmod +x $DIY_P1_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+        sudo apt-get update
+        sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git default-jre-headless libacl1-dev libcap-dev libelf-dev libffi-dev libgmp-dev libisl-dev libjansson-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libpython3.12-dev libssl-dev libtool libz-dev python3 python3-distutils python3-setuptools python3-pip python3.12 python3.12-dev rsync subversion swig time unzip wget zlib1g-dev libxml-parser-perl liblzma-dev liblzo2-dev zstd libzstd-dev libjson-c-dev libfuse-dev libpcre2-dev libpcre3-dev || true
 
-    - name: Update feeds
-      run: cd openwrt && ./scripts/feeds update -a
-
-    - name: Install feeds
-      run: cd openwrt && ./scripts/feeds install -a
-
-    - name: Load custom configuration
+    - name: 更新feeds
       run: |
-        [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-        chmod +x $DIY_P2_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        cd /mnt/openwrt/openwrt-src
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
-    - name: Download package
-      id: package
+    - name: 生成配置
       run: |
-        cd openwrt
+        cd /mnt/openwrt/openwrt-src
+        set -e
+        
+        echo "CONFIG_TARGET_${TARGET}=y" >> .config
+        echo "CONFIG_TARGET_${TARGET}_${SUBTARGET}=y" >> .config
+        echo "CONFIG_TARGET_${TARGET}_${SUBTARGET}_DEVICE_${PROFILE}=y" >> .config
+        
+        if [ -n "${{ github.event.inputs.packages }}" ]; then
+          CLEANED_PACKAGES=$(echo "${{ github.event.inputs.packages }}" | xargs)
+          
+          for pkg in $CLEANED_PACKAGES; do
+            [ -z "$pkg" ] && continue
+            
+            echo "CONFIG_PACKAGE_${pkg}=y" >> .config
+            
+            if [[ "$pkg" == luci-app-* ]]; then
+              app_name="${pkg#luci-app-}"
+              zh_cn_pkg="luci-i18n-${app_name}-zh-cn"
+              echo "CONFIG_PACKAGE_${zh_cn_pkg}=y" >> .config
+            fi
+          done
+        fi
+        
         make defconfig
-        make download -j8
-        find dl -size -1024c -exec ls -l {} \;
-        find dl -size -1024c -exec rm -f {} \;
+        
+        echo "=== 配置差异 (diffconfig) ==="
+        ./scripts/diffconfig.sh
+        
+        echo ""
+        echo "=== 所有已选中的软件包列表 ==="
+        grep '^CONFIG_PACKAGE_.*=y' .config | sed 's/^CONFIG_PACKAGE_//;s/=y$//' | sort
 
-    - name: Compile the firmware
-      id: compile
+    - name: 编译固件
       run: |
-        cd openwrt
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
-        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
-        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        cd /mnt/openwrt/openwrt-src
+        set -e
+        make download -j$(nproc) || make download -j1 V=s
+        make -j$(nproc) V=sc || make -j1 V=s
 
-    - name: Check space usage
-      if: (!cancelled())
-      run: df -hT
-
-    - name: Organize files
-      id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+    - name: 准备发布文件
+      if: success()
       run: |
-        cd openwrt/bin/targets/*/*
-        rm -rf packages
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "status=success" >> $GITHUB_OUTPUT
+        mkdir -p ${{ github.workspace }}/release_assets
+        cp -r /mnt/openwrt/openwrt-src/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/* ${{ github.workspace }}/release_assets/
 
-    - name: Upload firmware directory
-      uses: actions/upload-artifact@main
-      if: steps.organize.outputs.status == 'success' && !cancelled()
+    - name: 上传固件
+      if: success()
+      uses: actions/upload-artifact@v4
       with:
-        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-        path: ${{ env.FIRMWARE }}
+        name: openwrt-${{ env.PROFILE }}-${{ env.BUILD_TIME }}
+        path: ${{ github.workspace }}/release_assets/
+        retention-days: 1
 
-    - name: Generate release tag
-      id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-      run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        touch release.txt
-        echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: Upload firmware to release
-      uses: softprops/action-gh-release@master
-      if: steps.tag.outputs.status == 'success' && !cancelled()
+    - name: 创建发布
+      if: success()
+      uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ steps.tag.outputs.release_tag }}
-        body_path: release.txt
-        files: ${{ env.FIRMWARE }}/*
-
-    - name: Delete workflow runs
-      uses: Mattraks/delete-workflow-runs@main
-      with:
-        retain_days: 0
-        keep_minimum_runs: 2
-
-    - name: Remove old Releases
-      uses: dev-drprasad/delete-older-releases@master
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-      with:
-        keep_latest: 3
-        delete_tags: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        tag_name: openwrt-${{ env.PROFILE }}-${{ env.BUILD_TIME }}
+        name: OpenWrt ${{ env.PROFILE }} ${{ env.BUILD_TIME }}
+        body: |
+          设备: ${{ env.PROFILE }}
+          架构: ${{ env.TARGET }}/${{ env.SUBTARGET }}
+          软件: ${{ github.event.inputs.packages }}
+        files: ${{ github.workspace }}/release_assets/*
+        draft: false
+        prerelease: false
+        overwrite_files: true
