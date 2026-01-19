@@ -88,10 +88,12 @@ jobs:
     - name: 生成配置
       run: |
         cd /mnt/openwrt/openwrt-src
-        if [ -f $GITHUB_WORKSPACE/.config ]; then
-          cp $GITHUB_WORKSPACE/.config .config
-        fi
         set -e
+
+        if [ -s "${GITHUB_WORKSPACE}/.config" ]; then
+          echo "Found .config in repo root, merging..."
+          cat "${GITHUB_WORKSPACE}/.config" >> .config
+        fi
         
         echo "CONFIG_TARGET_${TARGET}=y" >> .config
         echo "CONFIG_TARGET_${TARGET}_${SUBTARGET}=y" >> .config
