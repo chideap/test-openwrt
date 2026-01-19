@@ -11,7 +11,7 @@ on:
       source_branch:
         description: '分支'
         required: true
-        default: 'openwrt-24.10.5'
+        default: 'openwrt-24.10'
         type: string
       custom_feeds:
         description: '软件源（src-git luci https://github.com/openwrt/luci.git）'
@@ -88,6 +88,9 @@ jobs:
     - name: 生成配置
       run: |
         cd /mnt/openwrt/openwrt-src
+        if [ -f $GITHUB_WORKSPACE/.config ]; then
+          cp $GITHUB_WORKSPACE/.config .config
+        fi
         set -e
         
         echo "CONFIG_TARGET_${TARGET}=y" >> .config
